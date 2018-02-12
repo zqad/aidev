@@ -1,0 +1,59 @@
+# vim:noet:ts=8:sw=8
+
+# Example rule
+# Generate the $(ACBUILD$@) macro
+$(call gen_acbuild,app-template)
+# The first dependency must be the base image that we should use
+app-template.aci: caffe2-py2-gpu.aci files/app-template/entry-point
+	# Begin by creating the build directory, including the base image and
+	# setting some default values
+	$(acbuild_prepare)
+
+	###
+	### Below is an example that installs the dependencies and such for Facebook's
+	### Detectron library
+	###
+	# Install dependencies
+	$(ACBUILD$@) run -- apt install -y python-pip python python-setuptools python-wheel python-scipy wget
+	$(ACBUILD$@) run -- pip install numpy pyyaml matplotlib opencv-python>=3.0 setuptools Cython mock pydot
+
+	# Install cocoapi
+	$(ACBUILD$@) run -- git clone https://github.com/cocodataset/cocoapi.git /cocoapi
+	$(ACBUILD$@) run -- sh -c 'cd /cocoapi/PythonAPI && make install'
+	$(ACBUILD$@) run -- rm -rf /cocoapi
+
+	# Install detectron
+	$(ACBUILD$@) run -- git clone https://github.com/facebookresearch/Detectron /opt/detectron
+	$(ACBUILD$@) run -- sh -c 'cd /opt/detectron && git checkout dd6c66159f7a1dc16680038adcafda638691b43e'
+	$(ACBUILD$@) run -- sh -c 'cd /opt/detectron && make -C lib'
+
+	# Fix weird broken stuff. It's unclear if this is a problem with Detectron
+	# or Caffe2. If the latter, move this fix.
+	$(ACBUILD$@) run -- ln -s /usr/local/lib/ /usr/lib/python2.7/lib
+	### End Detectron setup
+
+	# Copy the entry point from the files directory. This is what will be
+	# run when executing the container in application mode.
+	$(ACBUILD$@) copy-to-dir files/app-template/entry-point /
+	$(ACBUILD$@) run -- chmod 755 /entry-point
+
+	# Finalize
+	$(acbuild_finalize_cleanup)
+
+# Note that create_aci_from_script will clear and re-create the temporary build
+# directory. If you would like to modify the build directory yourself, it is
+# possible to split the process:
+#
+#     # Clear and recreate the build directory
+#     $(create_aci_from_script_stage1)
+#
+#     # Do stuff with the build directory (named .$@.tmpdir/a, e.g.
+#     # .app-template.aci.tmpdir)
+#     touch .$@.tmpdir/important_file
+#
+#     # Do the actual build, the acbuild command will be run from inside the
+#     # temporary build directory
+#  	  $(call create_aci_from_script_stage2,app-template)
+#
+# In this case, create_aci_from_script_stage1 will clear and re-create the
+# build directory. See Makefile for examples when this approach is used.

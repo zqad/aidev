@@ -1,0 +1,51 @@
+# vim:noet:ts=8:sw=8
+#
+# Base distro info
+SUITE 			?= xenial
+REPO_URL    		?= http://ftp.acc.umu.se/ubuntu/
+EXCLUDES_FILE  		:= files/base/excludes-$(SUITE)
+EXCLUDES  		:= $(shell cat $(EXCLUDES_FILE))
+
+# Use GPU? Set to "true" if so.
+GPU			:= true
+
+# Full path to acbuild
+ACBUILD			?= $(shell which acbuild)
+
+# CUDA debian package URLs. If you are building tensorflow and are updating
+# CUDA, remember to update below at the Tensorflow variables as well.
+CUDA_DEB_URL   		?= http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_9.1.85-1_amd64.deb
+CUDA_DEB_SHA256		?= 0ac9b45e53b2caa385b297b2ff1b3cb9b6e48f2e8dd51699a1e74630e63888bb
+CUDA_KEY_URL		?= https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/7fa2af80.pub
+CUDA_KEY_SHA256		?= 47217c49dcb9e47a8728b354450f694c9898cd4a126173044a69b1e9ac0fba96
+
+# cuDNN Debian package names. If you are building tensorflow and are updating
+# cuDDN, remember to update below at the Tensorflow variables as well.
+# These can be downloaded from https://developer.nvidia.com/cudnn
+LIBCUDNN_DEB		?= libcudnn7_7.0.5.15-1+cuda9.1_amd64.deb
+LIBCUDNN_DEV_DEB	?= libcudnn7-dev_7.0.5.15-1+cuda9.1_amd64.deb
+
+# Tensorflow options, note that 1 is true for the flag-type options. In a
+# perfect world, the below values should be the defaults and/or values
+# compatible with e.g. the CUDA and cuDNN version installed in previous steps
+TF_VERSION_HASH		?= 0464602ee99ff2a10336f2bea12440167e2d8a70
+TF_CUDA_COMPUTE_CAPABILITIES ?= 5.2
+TF_NEED_GCP		?= 1
+TF_NEED_HDFS		?= 1
+TF_NEED_S3		?= 1
+TF_ENABLE_XLA		?= 0
+TF_NEED_GDR		?= 0
+TF_NEED_VERBS		?= 0
+TF_NEED_OPENCL_SYCL	?= 0
+TF_NEED_MPI		?= 0
+TF_CUDA_VERSION		?= 9.1
+TF_CUDNN_VERSION	?= 7
+TF_CC_OPT_FLAGS		?= -DOMPI_SKIP_MPICXX=1 -march=native
+#TF_CC_OPT_FLAGS		?= -DOMPI_SKIP_MPICXX=1 -msse4.2 -mavx -mavx2
+TF_SET_ANDROID_WORKSPACE ?= 0
+TF_NEED_KAFKA		?= 0
+TF_NEED_TENSORRT	?= 0
+
+# Compile Caffe2 using the native arch parameter, enabling e.g. avx, avx2 and
+# fma. May be set to OFF or ON.
+CAFFE2_NATIVE_ARCH	?= ON

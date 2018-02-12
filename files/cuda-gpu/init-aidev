@@ -1,0 +1,6 @@
+# Make sure aidev members can use the nvidia devices
+chgrp aidev /dev/nvidia* 2> /dev/null
+chmod 775 /dev/nvidia* 2> /dev/null
+
+# Add the user to aidev
+usermod -G aidev -a $CONTAINER_USER

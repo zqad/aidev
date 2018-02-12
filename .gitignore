@@ -1,0 +1,13 @@
+.*.sw?
+*~
+
+*.aci
+*.tar
+
+.*.tmpdir
+.*.tmp
+.rkt-tmp-xauth-*
+
+libcudnn*.deb
+
+.latest-*

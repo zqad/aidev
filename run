@@ -1,0 +1,192 @@
+#!/bin/bash -e
+
+image_reload=
+image_suffix=
+
+container_dev=1
+force_x=
+
+# Arguments
+show_help=
+while getopts ":gnhrax" opt; do
+  case $opt in
+    g)
+      image_suffix=-gpu
+      use_gpu=1
+      ;;
+    n)
+      image_suffix=-nogpu
+      use_gpu=0
+      ;;
+    h)
+      show_help=1
+      ;;
+    r)
+      image_reload=1
+      ;;
+    a)
+      container_dev=
+      ;;
+    x)
+      force_x=1
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      show_help=1
+      ;;
+  esac
+done
+
+# Should we run with X support?
+x_support=
+if [ "$container_dev" -o "$force_x" ]; then
+  x_support=1
+fi
+
+shift $(($OPTIND - 1))
+
+# Check the image name, make magic things happen
+image_name=
+image_file=
+probe_suffix=
+case "$(basename "$1")" in
+  tensorflow|caffe2-py2|caffe2-py3)
+    image_name=$1
+    probe_suffix=1
+    ;;
+  base|xbase|build-xbase|cuda|cuddn)
+    image_name=$1
+    image_suffix=
+    ;;
+  "")
+    echo "No image type supplied"
+    show_help=1
+    ;;
+  *)
+    if [ -f $1 ]; then
+      image_file=$1
+      image_suffix=
+    else
+      echo "Invalid image file name or type: $1"
+      show_help=1
+    fi
+    ;;
+esac
+
+# Check for extra arguments
+if [ "$2" = "--" ]; then
+  shift
+  shift
+  EXTRA_ARGS="$@"
+elif [ -n "$2" ]; then
+  echo "Unrecognized argument: '$2'" >&2
+  show_help=1
+fi
+
+# Probe image suffix if requested
+if [ -z "$image_suffix" -a "$probe_suffix" ]; then
+  image_suffix=-nogpu
+  use_gpu=0
+  dev=$(ls -1 /dev/nvidia* 2> /dev/null | head -n1)
+  if [ -c "$dev" ]; then
+    image_suffix=-gpu
+    use_gpu=1
+  fi
+fi
+
+# Auto-choose whether to forward GPU devices
+if [ -z "$use_gpu" ]; then
+  use_gpu=0
+  if ls -1 /dev/nvidia* &>/dev/null; then
+    use_gpu=1
+  fi
+fi
+
+# Share all nvidia devices with container if requested
+if [ "$use_gpu" == 1 ]; then
+  DEV_ARGS=
+  for dev in $(ls -1 /dev/nvidia* 2>/dev/null); do
+    shortname=$(basename $dev)
+    DEV_ARGS="$DEV_ARGS --mount=volume=dev-$shortname,target=$dev --volume=dev-$shortname,kind=host,source=$dev"
+  done
+fi
+
+# Find rkt
+RKT="$(which rkt 2> /dev/null)"
+if [ -z "$RKT" ]; then
+  echo "Unable to find rkt binary in \$PATH" >&2
+  exit 1
+fi
+
+# Show help and exit if requested
+if [ "$show_help" ]; then
+  cat <<_EOF_
+Usage: run.sh [ -r ] [ -n | -g ] [ -h ] [ -a ] [ -x ] { tensorflow | caffe2-py2 | caffe2-py3 | cuddn | cuda | <path/to/image.aci> } [ -- <rkt run args> ]
+
+  -r    Force-reload image in rkt image store
+  -n    Force using a nogpu image
+  -g    Force using a gpu image
+  -a    Run in application mode (default is development mode)
+  -x    Enable X support (on by default in development mode, and off by default in application mode)
+  -h    This help
+
+_EOF_
+  exit 1
+fi
+
+# Calculate name of .latest-file and (if needed) image_file
+if [ -z "$image_file" ]; then
+  image_file=./${image_name}${image_suffix}.aci
+fi
+if ! [ -f $image_file ]; then
+  echo "Unable to find ${image_file}, aborting" >&2
+  exit 1
+fi
+latest_file=".latest-$(readlink -f "$image_file" | tr '/ ' '-_')"
+
+# Update image in rkt's image store
+if ! [ -e $latest_file ] || [ "$image_reload" ] || [ "$image_file" -nt $latest_file ] ; then
+  echo "Uploading image '$image_file' to the rkt image store"
+  $RKT fetch $image_file --insecure-options=image > ${latest_file}.tmp
+  mv -f ${latest_file}.tmp ${latest_file}
+fi
+image_sha=$(<$latest_file)
+
+# Generate xauth data and X environment/mount options
+X_ENV_ARGS=
+X_MOUNT_ARGS=
+if [ -n "$DISPLAY" ] && [ "$container_dev" -o "$run_x" ]; then
+  XAUTH_TMPFILE=$(mktemp ./.rkt-tmp-xauth-XXXXXX)
+  trap "rm -f '$XAUTH_TMPFILE'" EXIT
+  xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH_TMPFILE nmerge -
+  X_ENV_ARGS="--environment=DISPLAY=$DISPLAY --environment=XAUTHORITY=$HOME/.Xauthority"
+  X_MOUNT_ARGS="--mount=volume=x11auth,target=$HOME/.Xauthority --volume=x11auth,kind=host,source=$(readlink -f $XAUTH_TMPFILE)"
+  if [ -d /tmp/.X11-unix ]; then
+    X_MOUNT_ARGS="$X_MOUNT_ARGS --mount=volume=x11auth,target=/tmp/.X11-unix --volume=x11socket,kind=host,source=/tmp/.X11-unix"
+  fi
+fi
+
+# Make sure $HOME and $USER is set
+HOME=${HOME:-/home/$(id -un)}
+USER=${SUDO_USER:-${USER:-$(id -u)}}
+
+# Generate the hostname
+only_sha=${image_sha#sha*-}
+image_base="$(basename "$image_file")"
+hostname="${image_base%%.*}-${only_sha::8}"
+
+# Ready to run
+sudo $RKT run \
+  --interactive \
+  --net=host --dns=host \
+  $DEV_ARGS \
+  --mount=volume=homedir,target=$HOME --volume=homedir,kind=host,source=$HOME \
+  $X_MOUNT_ARGS \
+  --hostname=$hostname \
+  $image_sha \
+  $EXTRA_ARGS \
+  $X_ENV_ARGS \
+  --environment=CONTAINER_USER=$USER \
+  --environment=CONTAINER_HOME=$HOME \
+  --environment=CONTAINER_DEV=$container_dev \
+  --environment=CONTAINER_UID=$(id -u $USER)
